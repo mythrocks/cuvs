@@ -174,7 +174,7 @@ cuvsError_t cuvsRMMHostFree(void* ptr, size_t bytes);
  * @param[out] patch Patch version
  * @return cuvsError_t
  */
-cuvsError_t cuvsVersionGet(uint16_t *major, uint16_t *minor, uint16_t *patch);
+cuvsError_t cuvsVersionGet(uint16_t* major, uint16_t* minor, uint16_t* patch);
 
 /** @} */
 
