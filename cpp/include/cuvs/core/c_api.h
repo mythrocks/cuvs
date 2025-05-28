@@ -20,6 +20,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+uint16_t const CUVS_VERSION_MAJOR = 25;
+uint16_t const CUVS_VERSION_MINOR = 06;
+uint16_t const CUVS_VERSION_PATCH = 00;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
