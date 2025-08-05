@@ -354,6 +354,12 @@ public class CagraIndexImpl implements CagraIndex {
       final long queriesBytes = C_FLOAT_BYTE_SIZE * numQueries * vectorDimension;
       final long neighborsBytes = C_INT_BYTE_SIZE * numQueries * topK;
       final long distancesBytes = C_FLOAT_BYTE_SIZE * numQueries * topK;
+      final boolean hasPreFilter = query.getPrefilter() != null;
+      final BitSet[] prefilters =
+          hasPreFilter ? new BitSet[] {query.getPrefilter()} : new BitSet[0];
+      final long prefilterDataLength = hasPreFilter ? query.getNumDocs() * prefilters.length : 0;
+      final long prefilterLen = hasPreFilter ? (prefilterDataLength + 31) / 32 : 0;
+      final long prefilterBytes = C_INT_BYTE_SIZE * prefilterLen;
 
       try (var resourcesAccessor = query.getResources().access()) {
         var cuvsRes = resourcesAccessor.handle();
@@ -363,7 +369,6 @@ public class CagraIndexImpl implements CagraIndex {
             var distancesDP = allocateRMMSegmentNew(cuvsRes, distancesBytes)) {
 
           var prefilterDP = CloseableRMMAllocation.EMPTY;
-          long prefilterLen = 0;
 
           cudaMemcpy(queriesDP.handle(), floatsSeg, queriesBytes, INFER_DIRECTION);
 
@@ -384,30 +389,21 @@ public class CagraIndexImpl implements CagraIndex {
           checkCuVSError(returnValue, "cuvsStreamSync");
 
           // prepare the prefiltering data
-          long prefilterDataLength = 0;
           MemorySegment prefilterDataMemorySegment = MemorySegment.NULL;
-          BitSet[] prefilters;
-          if (query.getPrefilter() != null) {
-            prefilters = new BitSet[] {query.getPrefilter()};
+          if (hasPreFilter) {
             BitSet concatenatedFilters = concatenate(prefilters, query.getNumDocs());
             long[] filters = concatenatedFilters.toLongArray();
             prefilterDataMemorySegment = buildMemorySegment(localArena, filters);
-            prefilterDataLength = query.getNumDocs() * prefilters.length;
           }
 
           MemorySegment prefilter = cuvsFilter.allocate(localArena);
           MemorySegment prefilterTensor;
 
-          final long prefilterBytes;
-
-          if (prefilterDataMemorySegment == MemorySegment.NULL) {
+          if (!hasPreFilter) {
             cuvsFilter.type(prefilter, 0); // NO_FILTER
             cuvsFilter.addr(prefilter, 0);
-            prefilterBytes = 0;
           } else {
             long[] prefilterShape = {(prefilterDataLength + 31) / 32};
-            prefilterLen = prefilterShape[0];
-            prefilterBytes = C_INT_BYTE_SIZE * prefilterLen;
 
             prefilterDP = allocateRMMSegmentNew(cuvsRes, prefilterBytes);
 
