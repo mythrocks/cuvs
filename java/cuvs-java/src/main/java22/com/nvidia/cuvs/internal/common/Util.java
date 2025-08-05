@@ -362,4 +362,17 @@ public class Util {
       return datasetMemorySegment.get(C_POINTER, 0);
     }
   }
+
+  public static CloseableRMMAllocation allocateRMMSegmentNew(
+      long resourceHandle, long datasetBytes) {
+    try (var localArena = Arena.ofConfined()) {
+      MemorySegment datasetMemorySegment = localArena.allocate(C_POINTER);
+
+      var returnValue = cuvsRMMAlloc(resourceHandle, datasetMemorySegment, datasetBytes);
+      checkCuVSError(returnValue, "cuvsRMMAlloc");
+
+      var ret = datasetMemorySegment.get(C_POINTER, 0);
+      return new CloseableRMMAllocation(resourceHandle, datasetBytes, ret);
+    }
+  }
 }
