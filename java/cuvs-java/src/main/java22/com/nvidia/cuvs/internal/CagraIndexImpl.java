@@ -358,100 +358,95 @@ public class CagraIndexImpl implements CagraIndex {
       try (var resourcesAccessor = query.getResources().access()) {
         var cuvsRes = resourcesAccessor.handle();
 
-        var queriesDP = allocateRMMSegmentNew(cuvsRes, queriesBytes);
-        var neighborsDP = allocateRMMSegmentNew(cuvsRes, neighborsBytes);
-        var distancesDP = allocateRMMSegmentNew(cuvsRes, distancesBytes);
-        var prefilterDP = CloseableRMMAllocation.EMPTY;
-        long prefilterLen = 0;
+        try (var queriesDP = allocateRMMSegmentNew(cuvsRes, queriesBytes);
+            var neighborsDP = allocateRMMSegmentNew(cuvsRes, neighborsBytes);
+            var distancesDP = allocateRMMSegmentNew(cuvsRes, distancesBytes)) {
 
-        cudaMemcpy(queriesDP.handle(), floatsSeg, queriesBytes, INFER_DIRECTION);
+          var prefilterDP = CloseableRMMAllocation.EMPTY;
+          long prefilterLen = 0;
 
-        long[] queriesShape = {numQueries, vectorDimension};
-        MemorySegment queriesTensor =
-            prepareTensor(
-                localArena, queriesDP.handle(), queriesShape, kDLFloat(), 32, kDLCUDA(), 1);
-        long[] neighborsShape = {numQueries, topK};
-        MemorySegment neighborsTensor =
-            prepareTensor(
-                localArena, neighborsDP.handle(), neighborsShape, kDLUInt(), 32, kDLCUDA(), 1);
-        long[] distancesShape = {numQueries, topK};
-        MemorySegment distancesTensor =
-            prepareTensor(
-                localArena, distancesDP.handle(), distancesShape, kDLFloat(), 32, kDLCUDA(), 1);
+          cudaMemcpy(queriesDP.handle(), floatsSeg, queriesBytes, INFER_DIRECTION);
 
-        var returnValue = cuvsStreamSync(cuvsRes);
-        checkCuVSError(returnValue, "cuvsStreamSync");
-
-        // prepare the prefiltering data
-        long prefilterDataLength = 0;
-        MemorySegment prefilterDataMemorySegment = MemorySegment.NULL;
-        BitSet[] prefilters;
-        if (query.getPrefilter() != null) {
-          prefilters = new BitSet[] {query.getPrefilter()};
-          BitSet concatenatedFilters = concatenate(prefilters, query.getNumDocs());
-          long[] filters = concatenatedFilters.toLongArray();
-          prefilterDataMemorySegment = buildMemorySegment(localArena, filters);
-          prefilterDataLength = query.getNumDocs() * prefilters.length;
-        }
-
-        MemorySegment prefilter = cuvsFilter.allocate(localArena);
-        MemorySegment prefilterTensor;
-
-        final long prefilterBytes;
-
-        if (prefilterDataMemorySegment == MemorySegment.NULL) {
-          cuvsFilter.type(prefilter, 0); // NO_FILTER
-          cuvsFilter.addr(prefilter, 0);
-          prefilterBytes = 0;
-        } else {
-          long[] prefilterShape = {(prefilterDataLength + 31) / 32};
-          prefilterLen = prefilterShape[0];
-          prefilterBytes = C_INT_BYTE_SIZE * prefilterLen;
-
-          prefilterDP = allocateRMMSegmentNew(cuvsRes, prefilterBytes);
-
-          cudaMemcpy(
-              prefilterDP.handle(), prefilterDataMemorySegment, prefilterBytes, HOST_TO_DEVICE);
-
-          prefilterTensor =
+          long[] queriesShape = {numQueries, vectorDimension};
+          MemorySegment queriesTensor =
               prepareTensor(
-                  localArena, prefilterDP.handle(), prefilterShape, kDLUInt(), 32, kDLCUDA(), 1);
+                  localArena, queriesDP.handle(), queriesShape, kDLFloat(), 32, kDLCUDA(), 1);
+          long[] neighborsShape = {numQueries, topK};
+          MemorySegment neighborsTensor =
+              prepareTensor(
+                  localArena, neighborsDP.handle(), neighborsShape, kDLUInt(), 32, kDLCUDA(), 1);
+          long[] distancesShape = {numQueries, topK};
+          MemorySegment distancesTensor =
+              prepareTensor(
+                  localArena, distancesDP.handle(), distancesShape, kDLFloat(), 32, kDLCUDA(), 1);
 
-          cuvsFilter.type(prefilter, 1);
-          cuvsFilter.addr(prefilter, prefilterTensor.address());
-        }
+          var returnValue = cuvsStreamSync(cuvsRes);
+          checkCuVSError(returnValue, "cuvsStreamSync");
 
-        returnValue = cuvsStreamSync(cuvsRes);
-        checkCuVSError(returnValue, "cuvsStreamSync");
+          // prepare the prefiltering data
+          long prefilterDataLength = 0;
+          MemorySegment prefilterDataMemorySegment = MemorySegment.NULL;
+          BitSet[] prefilters;
+          if (query.getPrefilter() != null) {
+            prefilters = new BitSet[] {query.getPrefilter()};
+            BitSet concatenatedFilters = concatenate(prefilters, query.getNumDocs());
+            long[] filters = concatenatedFilters.toLongArray();
+            prefilterDataMemorySegment = buildMemorySegment(localArena, filters);
+            prefilterDataLength = query.getNumDocs() * prefilters.length;
+          }
 
-        returnValue =
-            cuvsCagraSearch(
-                cuvsRes,
-                segmentFromSearchParams(localArena, query.getCagraSearchParameters()),
-                cagraIndexReference.getMemorySegment(),
-                queriesTensor,
-                neighborsTensor,
-                distancesTensor,
-                prefilter);
-        checkCuVSError(returnValue, "cuvsCagraSearch");
+          MemorySegment prefilter = cuvsFilter.allocate(localArena);
+          MemorySegment prefilterTensor;
 
-        returnValue = cuvsStreamSync(cuvsRes);
-        checkCuVSError(returnValue, "cuvsStreamSync");
+          final long prefilterBytes;
 
-        cudaMemcpy(neighborsMemorySegment, neighborsDP.handle(), neighborsBytes, INFER_DIRECTION);
-        cudaMemcpy(distancesMemorySegment, distancesDP.handle(), distancesBytes, INFER_DIRECTION);
+          if (prefilterDataMemorySegment == MemorySegment.NULL) {
+            cuvsFilter.type(prefilter, 0); // NO_FILTER
+            cuvsFilter.addr(prefilter, 0);
+            prefilterBytes = 0;
+          } else {
+            long[] prefilterShape = {(prefilterDataLength + 31) / 32};
+            prefilterLen = prefilterShape[0];
+            prefilterBytes = C_INT_BYTE_SIZE * prefilterLen;
 
-        returnValue = cuvsRMMFree(cuvsRes, distancesDP.handle(), distancesBytes);
-        checkCuVSError(returnValue, "cuvsRMMFree");
-        returnValue = cuvsRMMFree(cuvsRes, neighborsDP.handle(), neighborsBytes);
-        checkCuVSError(returnValue, "cuvsRMMFree");
-        returnValue = cuvsRMMFree(cuvsRes, queriesDP.handle(), queriesBytes);
-        checkCuVSError(returnValue, "cuvsRMMFree");
+            prefilterDP = allocateRMMSegmentNew(cuvsRes, prefilterBytes);
 
-        if (prefilterLen > 0) {
+            cudaMemcpy(
+                prefilterDP.handle(), prefilterDataMemorySegment, prefilterBytes, HOST_TO_DEVICE);
+
+            prefilterTensor =
+                prepareTensor(
+                    localArena, prefilterDP.handle(), prefilterShape, kDLUInt(), 32, kDLCUDA(), 1);
+
+            cuvsFilter.type(prefilter, 1);
+            cuvsFilter.addr(prefilter, prefilterTensor.address());
+          }
+
+          returnValue = cuvsStreamSync(cuvsRes);
+          checkCuVSError(returnValue, "cuvsStreamSync");
+
           returnValue =
-              cuvsRMMFree(cuvsRes, prefilterDP.handle(), C_INT_BYTE_SIZE * prefilterBytes);
-          checkCuVSError(returnValue, "cuvsRMMFree");
+              cuvsCagraSearch(
+                  cuvsRes,
+                  segmentFromSearchParams(localArena, query.getCagraSearchParameters()),
+                  cagraIndexReference.getMemorySegment(),
+                  queriesTensor,
+                  neighborsTensor,
+                  distancesTensor,
+                  prefilter);
+          checkCuVSError(returnValue, "cuvsCagraSearch");
+
+          returnValue = cuvsStreamSync(cuvsRes);
+          checkCuVSError(returnValue, "cuvsStreamSync");
+
+          cudaMemcpy(neighborsMemorySegment, neighborsDP.handle(), neighborsBytes, INFER_DIRECTION);
+          cudaMemcpy(distancesMemorySegment, distancesDP.handle(), distancesBytes, INFER_DIRECTION);
+
+          if (prefilterLen > 0) {
+            returnValue =
+                cuvsRMMFree(cuvsRes, prefilterDP.handle(), C_INT_BYTE_SIZE * prefilterBytes);
+            checkCuVSError(returnValue, "cuvsRMMFree");
+          }
         }
       }
 
