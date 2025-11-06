@@ -130,10 +130,22 @@ public class CagraIndexImpl implements CagraIndex {
   public void close() {
     checkNotDestroyed();
     try {
-      int returnValue = cuvsCagraIndexDestroy(cagraIndexReference.getMemorySegment());
-      checkCuVSError(returnValue, "cuvsCagraIndexDestroy");
-      if (cagraIndexReference.dataset != null) {
-        cagraIndexReference.dataset.close();
+      try (var resourcesAccessor = resources.access()) {
+        var cuvsRes = resourcesAccessor.handle();
+        var returnValue = cuvsStreamSync(cuvsRes);
+        checkCuVSError(returnValue, "cuvsStreamSync");
+
+        try {
+          Thread.sleep(0);
+        } catch (Exception ignore) {
+          System.out.println("Sleep fail! " + ignore.getMessage());
+        }
+
+        returnValue = cuvsCagraIndexDestroy(cagraIndexReference.getMemorySegment());
+        checkCuVSError(returnValue, "cuvsCagraIndexDestroy");
+        if (cagraIndexReference.dataset != null) {
+          cagraIndexReference.dataset.close();
+        }
       }
     } finally {
       destroyed = true;

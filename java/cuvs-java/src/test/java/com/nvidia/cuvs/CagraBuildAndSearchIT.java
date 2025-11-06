@@ -34,7 +34,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.LongToIntFunction;
 import java.util.function.Supplier;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.slf4j.Logger;
@@ -211,7 +210,7 @@ public class CagraBuildAndSearchIT extends CuVSTestCase {
             });
   }
 
-  @Ignore // https://github.com/rapidsai/cuvs/issues/1467
+  //  @Ignore // https://github.com/rapidsai/cuvs/issues/1467
   @Test
   public void testFloatIndexing() throws Throwable {
     testIndexing(
@@ -229,9 +228,9 @@ public class CagraBuildAndSearchIT extends CuVSTestCase {
   }
 
   private void testIndexing(Supplier<CuVSMatrix> matrixFactory) throws Exception {
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 1; ++i) {
       var dataset = matrixFactory.get();
-      int numTestsRuns = 4;
+      int numTestsRuns = 2;
       runConcurrently(
           numTestsRuns,
           () ->

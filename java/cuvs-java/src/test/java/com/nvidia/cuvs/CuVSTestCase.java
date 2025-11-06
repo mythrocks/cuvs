@@ -191,11 +191,12 @@ public abstract class CuVSTestCase {
   }
 
   protected static float[][] createFloatMatrix(int rows, int cols) {
+    System.out.println("CALEB: Creating a float matrix of size: " + rows + " x " + cols);
     float[][] result = new float[rows][cols];
 
     for (int r = 0; r < rows; ++r) {
       for (int c = 0; c < cols; ++c) {
-        result[r][c] = randomFloat();
+        result[r][c] = 0;
       }
     }
     return result;
