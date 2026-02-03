@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "raft/core/logger_macros.hpp"
 #include "search_single_cta_kernel.cuh"
 
 #include "bitonic.hpp"
@@ -2113,6 +2114,21 @@ auto get_runner(Args... args) -> std::shared_ptr<RunnerT>
   return runner;
 }
 
+template <typename KernelT> // inline 
+void set_larger_max_smem_size(uint32_t smem_size, KernelT& kernel)
+{
+  static std::mutex mutex;
+  static uint32_t running_max_smem_size = smem_size;
+  if (smem_size > running_max_smem_size) {
+    std::lock_guard<std::mutex> guard(mutex);
+    if (smem_size > running_max_smem_size) {
+      running_max_smem_size = smem_size;
+      RAFT_CUDA_TRY(
+        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, running_max_smem_size));
+    }
+  }
+}
+
 template <typename DataT,
           typename IndexT,
           typename DistanceT,
@@ -2141,6 +2157,13 @@ void select_and_run(
   SampleFilterT sample_filter,
   cudaStream_t stream)
 {
+  // std::stringstream ss;
+  // ss << "CALEB: select_and_run(): thread_id=" << std::this_thread::get_id() << ", smem_size = " << smem_size;
+  // throw std::runtime_error(ss.str());
+  // std::cout << ss.str() << std::endl;
+  // RAFT_LOG_CRITICAL("CALEB: select_and_run(): thread_id=%d, smem_size=%d", std::this_thread::get_id(), smem_size);
+
+  // std::cout << "CALEB: select_and_run(): thread_id=" << std::this_thread::get_id() << ", smem_size = " << smem_size << std::endl;
   const SourceIndexT* source_indices_ptr =
     source_indices.has_value() ? source_indices->data_handle() : nullptr;
 
@@ -2176,8 +2199,9 @@ control is returned in this thread (in persistent_runner_t constructor), so we'r
     using descriptor_base_type = dataset_descriptor_base_t<DataT, IndexT, DistanceT>;
     auto kernel = search_kernel_config<false, descriptor_base_type, SourceIndexT, SampleFilterT>::
       choose_itopk_and_mx_candidates(ps.itopk_size, num_itopk_candidates, block_size);
-    RAFT_CUDA_TRY(
-      cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+    // RAFT_CUDA_TRY(
+    //   cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, 4u*1024));
+    set_larger_max_smem_size(smem_size, kernel);
     dim3 thread_dims(block_size, 1, 1);
     dim3 block_dims(1, num_queries, 1);
     RAFT_LOG_DEBUG(
